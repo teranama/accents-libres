@@ -1,0 +1,673 @@
+<!doctype html>
+<html lang="fr-FR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Accents Libres</title>
+  
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans&display=swap" rel="stylesheet">
+
+<style>
+  /* Base */
+  :root{
+    --ui-font: "Noto Sans", system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
+  }
+  html,body{margin:0;padding:0}
+  body{font-family:var(--ui-font);}
+
+  /* Stage */
+  #fitwrap{
+    height:100vh; display:flex; align-items:flex-start; justify-content:center; overflow:hidden;
+  }
+  #stage{
+    position:relative; width:1024px; height:606px; transform-origin:top left;
+  }
+  #bgwrap{
+    position:relative; width:100%; height:100%;
+    background:url('img/pcdemo.png') no-repeat center top / 100% 100%;
+  }
+  .overlay{position:absolute;}
+
+  /* Input (textarea#output) */
+  #output{
+    top:240px; left:14.5%;
+    width:70%; height:130px;
+
+    font-family:var(--ui-font);
+    font-size:24px; line-height:1.6;
+    /* kerning / rendering */
+    font-kerning:normal;
+    font-feature-settings:"kern";
+    font-variant-ligatures:common-ligatures;
+    text-rendering:optimizeLegibility;
+    -webkit-font-smoothing:antialiased;
+    -moz-osx-font-smoothing:grayscale;
+    letter-spacing:0;
+
+    padding:12px 14px; border:1px solid #bbb; border-radius:10px;
+    background:#fff; resize:none; ime-mode:disabled; outline:none;
+    box-sizing:border-box;
+  }
+  #output.placeholder{color:#d00;}
+
+  /* (optional) flash marker kept for compatibility */
+  .flash{position:absolute; width:44px; height:auto; transform:translate(-50%,-50%); pointer-events:none;}
+
+  /* preview NEXT marker (kept but neutralized) */
+  #preview-NEXT.default::after{content:none !important; border:none !important; width:0 !important; height:0 !important;}
+  #preview-NEXT{font-size:22px; text-shadow:.5px 0 currentColor,-.5px 0 currentColor,0 .5px currentColor,0 -.5px currentColor;}
+</style>
+
+</head>
+<body>
+
+<div id="fitwrap">
+  <div id="stage">
+<div id="bgwrap">
+
+  <div class="overlay" style="top:110px; left:15%; width:70%; text-align:center; font-size:16px; font-weight:500;">
+    Tous les accents se tapent en une seule frappe.<br>
+Les chiffres se saisissent sans Maj.<br>
+L’apostrophe se tape directement, sans espace.<br>
+Les lettres accentuées peuvent aussi être en majuscules.<br>
+Le point est, lui aussi, plus pratique.
+  </div>
+
+  <div class="overlay" 
+     style="bottom:30px; left:-20%; width:70%; text-align:center;
+            font-size:16px; font-weight:500; color:#fff;">
+  
+</div>
+
+  <!-- Preview labels overlay container (inside #stage to follow scaling) -->
+  <div id="previewLabels" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:9999;"></div>
+
+
+  <textarea id="output" class="overlay" style="top:240px; left:14.5%; height:130px; width:70%; font-size: 24px;"></textarea>
+  <div class="overlay" style="bottom:160px; left:50%; transform:translateX(-50%); display:flex; gap:20px;">
+    
+
+</div>
+
+<script>
+(function(){
+  function ensurePadId(){
+    // Prefer existing #output from Teranama
+    var t = document.getElementById('output') || document.querySelector('textarea');
+    if (t && !t.id) t.id = 'pad';
+    else if (t && t.id !== 'pad') t.id = 'pad';
+    // best-effort input-friendly flags
+    t && (t.autocomplete = 'off', t.autocorrect = 'off', t.autocapitalize = 'off', t.spellcheck = false);
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', ensurePadId);
+  else ensurePadId();
+})();
+</script>
+<script>(function(){ 
+  var t = document.getElementById('output') || document.querySelector('textarea');
+  if (t){ 
+    t.id = 'pad'; 
+    t.autocomplete='off'; t.autocorrect='off'; t.autocapitalize='off'; t.spellcheck=false;
+  }
+})();</script><script>
+
+(()=>{
+  // 악상파실 엔진 v0.4 — 확실한 작동을 위해 beforeinput + keydown 이중 처리
+  const pad = document.getElementById('pad');
+  pad.setAttribute('autocomplete','off');
+  pad.setAttribute('autocorrect','off');
+  pad.setAttribute('autocapitalize','off');
+  pad.setAttribute('spellcheck','false');
+  pad.focus();
+
+  window.lastSubst = null; // { from, start, end }
+
+  const maps = {
+    comma: { a:'à', e:'è', u:'ù', c:'ç', A:'À', E:'È', U:'Ù', C:'Ç' },
+    semi:  { a:'â', e:'ê', i:'î', o:'ô', u:'û', A:'Â', E:'Ê', I:'Î', O:'Ô', U:'Û' },
+    bang:  { a:'ä', e:'ë', i:'ï', o:'ö', u:'ü', y:'ÿ', A:'Ä', E:'Ë', I:'Ï', O:'Ö', U:'Ü', Y:'Ÿ' }
+  };
+  
+  function replaceRange(el, start, end, text){
+    const v = el.value;
+    el.value = v.slice(0,start) + text + v.slice(end);
+    const pos = start + text.length;
+    el.setSelectionRange(pos,pos);
+  }
+  function insertAtCursor(el, text){
+    const {selectionStart:s, selectionEnd:e, value} = el;
+    const before = value.slice(0,s);
+    const after  = value.slice(e);
+    el.value = before + text + after;
+    const pos = before.length + text.length;
+    el.setSelectionRange(pos,pos);
+  }
+
+  function compose(prev, cur){
+    if ((prev === 'q' || prev === 'Q') && (cur === 'e' || cur === 'E')) return (cur==='e'?'é':'É');
+	if ((prev === 'q' || prev === 'Q') && (cur === 'o' || cur === 'O')) return (cur === 'o' ? 'œ' : 'Œ');
+    if (prev === ',') return maps.comma[cur] || null;
+    if (prev === ';') return maps.semi[cur]  || null;
+    if (prev === '!') return maps.bang[cur]  || null;
+    return null;
+  }
+
+  // --- 숫자열 강제 & «» ---
+  function handleDigitRow(e){
+    const code = e.code;
+    if (!code || !code.startsWith('Digit')) return false;
+    e.preventDefault();
+    if (e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey){
+      const sym = {Digit1:'&',Digit2:'é',Digit3:'«',Digit4:"»",Digit5:'(',Digit6:'-',Digit7:'è',Digit8:'_',Digit9:'ç',Digit0:'à'}[code];
+      insertAtCursor(pad, sym || '');
+    } else {
+      insertAtCursor(pad, code.slice(5));
+    }
+    lastSubst = null; return true;
+  }
+  function handleShiftArrows(e){
+    if (e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey){
+      if (e.code==='Digit3'){ e.preventDefault(); insertAtCursor(pad,'«'); return true; }
+      if (e.code==='Digit4'){ e.preventDefault(); insertAtCursor(pad,'»'); return true; }
+    }
+    return false;
+  }
+  
+  // AZERTY: [²  ] 키에서 Shift 누르면 % 출력
+  function handleAzertyPercentKey(e){
+  // 많은 FR 보드에서 이 물리키의 code는 'Backquote' (가끔 'IntlBackslash')
+  if ((e.code === 'Backquote' || e.code === 'IntlBackslash')
+      && !e.ctrlKey && !e.metaKey && !e.altKey && e.shiftKey) {
+    e.preventDefault();
+    insertAtCursor(pad, '%');
+    lastSubst = null;
+    return true;
+  }
+  return false;
+}
+
+  // AZERTY: Enter 옆 [ù %] 물리키를 항상 quotes로 강제 (Shift=", no-shift=')
+  function handleAzertyQuoteKey(e){
+    if (e.code === 'Quote' && !e.ctrlKey && !e.metaKey && !e.altKey){
+      e.preventDefault();
+      insertAtCursor(pad, e.shiftKey ? '"' : "'");
+      lastSubst = null;
+      return true;
+    }
+    return false;
+  }
+
+// --- Backspace: 복구 없이 그냥 지우기 + ESC로 1회 복구 ---
+pad.addEventListener('keydown', (e)=>{
+  if (handleDigitRow(e)) return;
+  if (handleShiftArrows(e)) return;
+  if (handleAzertyQuoteKey(e)) return;
+  if (handleAzertyPercentKey(e)) return;
+
+  // ESC로 "방금 자동변환" 1회 복구
+  if (e.key === 'Escape' && lastSubst){
+    const {from, start, end} = lastSubst;
+    const s = pad.selectionStart, se = pad.selectionEnd;
+    const caretIn = (s === se && s >= start && s <= end); // 범위 위에 커서 있을 때만
+    if (caretIn){
+      e.preventDefault();
+      replaceRange(pad, start, end, from);
+      lastSubst = null;               // 복구는 1회만
+      return;
+    }
+  }
+
+  // Backspace는 그냥 지우기 (복구 기록만 무효화)
+  if (e.key === 'Backspace'){
+    lastSubst = null;                 // 기록만 비우고 기본 동작 진행
+    return;
+  }
+}, true);
+
+
+  // --- 핵심: beforeinput에서 조합 (브라우저 표준) ---
+  pad.addEventListener('beforeinput', (e)=>{
+    if (e.inputType !== 'insertText' || typeof e.data !== 'string' || e.data.length !== 1) return;
+    const cur = e.data;
+    const s = pad.selectionStart, ed = pad.selectionEnd;
+    if (s !== ed || s < 1) return; // 선택 중이면 무시
+    const prev = pad.value[s-1];
+    const out = compose(prev, cur);
+    if (!out) return;
+    e.preventDefault();
+    const from = prev + cur;
+    replaceRange(pad, s-1, s, out); // prev 치환, cur 삽입 방지
+    lastSubst = {from, start: s-1, end: s-1 + out.length};
+  });
+
+  // --- 보조: keydown에서도 조합(일부 환경은 beforeinput 누락) ---
+  pad.addEventListener('keydown', (e)=>{
+    // 따옴표는 리터럴: 그냥 통과
+    if (e.key === '"' || e.key === "'") return;
+
+    const printable = e.key && e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey;
+    if (!printable) return;
+    const s = pad.selectionStart, ed = pad.selectionEnd;
+    if (s !== ed || s < 1) return;
+
+    const prev = pad.value[s-1];
+    const out = compose(prev, e.key);
+    if (!out) return;
+
+    e.preventDefault();
+    const from = prev + e.key;
+    replaceRange(pad, s-1, s, out);
+    lastSubst = {from, start: s-1, end: s-1 + out.length};
+  }, true);
+})();
+
+</script>
+<script>
+(function(){
+  const pad = document.getElementById('pad');
+  if (!pad) return;
+
+  // 점/콜론 블록만 치환: 현재 아저티의 실제 출력 문자 기준으로 확정
+  pad.addEventListener('beforeinput', function(e){
+    if (e.inputType !== 'insertText' || typeof e.data !== 'string' || e.data.length !== 1) return;
+
+    // 현재 아저티: [; .] [: /]  → 우리가 원하는: [; :] [. /]
+    // 들어온 문자만 기준으로 간단 매핑
+    const map = { ';': ';', '.': ':', ':': '.', '/': '/' };
+    const out = map[e.data];
+    if (!out) return;
+
+    e.preventDefault();
+    const s = pad.selectionStart, t = pad.selectionEnd;
+    pad.setRangeText(out, s, t, 'end'); // 커서 위치에 치환
+  }, true);
+})();
+</script>
+<script>
+(function(){
+  const pad   = document.getElementById('pad');
+  const stage = document.getElementById('stage');
+  if (!pad || !stage) return;
+
+  // ===== 스타일 =====
+  const style = document.createElement('style');
+  style.textContent = `
+    #accentOverlay{position:absolute;inset:0;pointer-events:none;z-index:9999;}
+    .accent-marker{position:absolute;height:0;border-bottom:2px solid #222;opacity:.95;}
+  `;
+  document.head.appendChild(style);
+
+  // ===== 오버레이 =====
+  const overlay = document.getElementById('accentOverlay') || (() => {
+    const d = document.createElement('div');
+    d.id = 'accentOverlay';
+    stage.appendChild(d);
+    return d;
+  })();
+
+  // ===== 상태/유틸 =====
+  let pending = null; // { trigger, index, markerEl }
+  const VOWELS = 'aeiouycAEIOUYC'; // c 추가
+
+  const MAP = {
+    ',': { a:'à', e:'è', u:'ù', c:'ç', A:'À', E:'È', U:'Ù', C:'Ç' }, // ç, Ç 추가
+    ';': { a:'â', e:'ê', i:'î', o:'ô', u:'û', A:'Â', E:'Ê', I:'Î', O:'Ô', U:'Û' },
+    '!': { a:'ä', e:'ë', i:'ï', o:'ö', u:'ü', y:'ÿ', A:'Ä', E:'Ë', I:'Ï', O:'Ö', U:'Ü', Y:'Ÿ' },
+    'q': { e:'é', E:'É', o:'œ', O:'Œ' } // œ Œ 추가
+  };
+
+
+  function rectOfRange(textarea, start, end){
+    const ta = textarea;
+    const rTA = ta.getBoundingClientRect();
+    const cs  = getComputedStyle(ta);
+
+    const mirror = document.createElement('div');
+    mirror.style.cssText = [
+      'position:fixed;visibility:hidden;white-space:pre-wrap;word-wrap:break-word;overflow-wrap:break-word;',
+      `top:${rTA.top}px;left:${rTA.left}px;width:${rTA.width}px;`,
+      `font:${cs.font};line-height:${cs.lineHeight};`,
+      `padding:${cs.paddingTop} ${cs.paddingRight} ${cs.paddingBottom} ${cs.paddingLeft};`,
+      `border:${cs.borderTopWidth} solid transparent;box-sizing:border-box;`
+    ].join('');
+
+    const val  = ta.value;
+    const pre  = document.createTextNode(val.slice(0, start));
+    const span = document.createElement('span');
+    span.textContent = val.slice(start, end) || '\u200b';
+    const post = document.createTextNode(val.slice(end));
+
+    mirror.appendChild(pre); mirror.appendChild(span); mirror.appendChild(post);
+    document.body.appendChild(mirror);
+    const rSpan = span.getBoundingClientRect();
+    document.body.removeChild(mirror);
+
+    const rStage = stage.getBoundingClientRect();
+    return {
+      left:  rSpan.left - rStage.left,
+      top:   rSpan.bottom - rStage.top,
+      width: Math.max(1, rSpan.width || 8)
+    };
+  }
+
+function removeAllMarkers(){
+  // 마커 전부 제거 (DOM 노드 실수로 남는 경우까지 제거)
+  try { overlay.replaceChildren(); } catch(e) {
+    overlay.querySelectorAll('.accent-marker').forEach(n => n.remove());
+  }
+}
+  function removeMarker(){
+    if (pending && pending.markerEl) pending.markerEl.remove();
+    if (pending) pending.markerEl = null;
+  }
+function nuke(){
+  // 상태/마커 완전 초기화
+  pending = null;
+  removeAllMarkers();
+}
+
+  function showMarkerForTrigger(idx){
+    removeMarker();
+    const r = rectOfRange(pad, idx, idx+1);
+    const m = document.createElement('div');
+    m.className = 'accent-marker';
+    m.style.left = `${r.left}px`;
+    m.style.top  = `${r.top}px`;
+    m.style.width= `${r.width}px`;
+    overlay.appendChild(m);
+    if (pending) pending.markerEl = m;
+  }
+
+  // ===== 핵심 로직 =====
+  pad.addEventListener('keydown', (e)=>{
+    // "다음 키가 들어오면 무조건 확정" 규칙:
+    // - 모음이면 beforeinput에서 변환 처리 → 이후 input 훅에서 nuke()
+    // - 그 외 어떤 키(화살표/한영/조합키 포함)든 들어오면 즉시 nuke()
+    //   (단, Backspace는 트리거 삭제 특수 처리)
+
+    // 트리거 입력 처리 (데드키 아님: 먼저 찍히게 둠)
+	// [NEW] pending 상태에서 "모음키"가 눌리면 즉석 변환 + 즉시 정리
+if (pending && !e.ctrlKey && !e.altKey && !e.metaKey && e.key && e.key.length === 1) {
+  if (VOWELS.includes(e.key)) {
+    const map = MAP[pending.trigger];
+    const out = map && map[e.key];
+    if (out) {
+      e.preventDefault();
+      pad.setRangeText(out, pending.index, pending.index + 1, 'end');
+      nuke();                          // ← 변환 직후 바로 밑줄 제거
+      return;
+    }
+  }
+}
+
+    if (!e.ctrlKey && !e.altKey && !e.metaKey &&
+        (e.key === ',' || e.key === ';' || e.key === '!' || e.key === 'q' || e.key === 'Q')){
+      setTimeout(()=>{
+        const i = pad.selectionStart - 1;
+        const ch = pad.value[i];
+        if ([',',';','!','q','Q'].includes(ch)){
+          pending = { trigger: ch, index: i, markerEl: null };
+          showMarkerForTrigger(i);
+        } else {
+          nuke();
+        }
+      },0);
+      return; // 그대로 찍힘
+    }
+
+    // 대기 중 Backspace: 트리거 한 글자만 삭제
+    if (pending && e.key === 'Backspace' && !lastSubst){
+      if (pad.selectionStart === pending.index + 1 && pad.selectionEnd === pending.index + 1){
+        e.preventDefault();
+        pad.setRangeText('', pending.index, pending.index + 1, 'end');
+        nuke();
+        return;
+      } else {
+        nuke();
+        return;
+      }
+    }
+
+    // 대기 중이고 "이번 키가 모음이 아님" → 즉시 nuke()
+    if (pending){
+      const isPrintable = e.key && e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey;
+      const isVowelKey  = isPrintable && VOWELS.includes(e.key);
+      if (!isVowelKey){
+        // 엔터/탭/스페이스/화살표/조합키/기타 전부 포함
+        // (모음이면 beforeinput이 처리하고, 그 뒤 input에서 nuke())
+        nuke();
+      }
+    }
+  }, true);
+
+  // 모음이 들어오려는 순간: [트리거+모음] → 1글자 치환
+  pad.addEventListener('beforeinput', (e)=>{
+    if (!pending) return;
+    if (e.inputType !== 'insertText' || typeof e.data !== 'string' || e.data.length !== 1) return;
+
+    const v = e.data;
+    if (!VOWELS.includes(v)) return;
+
+    const map = MAP[pending.trigger];
+    const out = map && map[v];
+    if (!out) return;
+
+    e.preventDefault();
+    pad.setRangeText(out, pending.index, pending.index + 1, 'end');
+	nuke();                                 // ← 여기서도 즉시 제거
+setTimeout(removeAllMarkers, 0);        // 렌더 지연 대비 한 번 더
+    // 변환 직후 즉시 정리 + 한 프레임 뒤 한 번 더
+    nuke();
+    requestAnimationFrame(removeAllMarkers);
+  }, true);
+
+  // 어떤 입력이든 실제 반영되면 무조건 정리 (붙여넣기/삭제/IME 포함)
+  pad.addEventListener('compositionstart', nuke, true);
+  pad.addEventListener('paste', nuke, true);
+  pad.addEventListener('cut', nuke, true);
+
+  // 커서 이동/포커스 변화 시도 정리
+function cancelOnMove(){
+  if (!pending) return;
+  // 캐럿이 "트리거 바로 뒤"가 아니면 = 확정된 것으로 보고 정리
+  if (pad.selectionStart !== pending.index + 1 || pad.selectionEnd !== pending.index + 1){
+    nuke();
+  }
+}
+pad.addEventListener('mouseup',  cancelOnMove, true);
+pad.addEventListener('keyup',    cancelOnMove, true);
+
+  pad.addEventListener('blur',     nuke, true);
+})();
+</script>
+<!-- ===== close demo containers ===== -->
+</div></div></div>
+
+<!-- ===== Reviews: Accents Libres ===== -->
+<section id="reviews" style="background:#f3f1e7; padding:64px 0; font-family:var(--ui-font);">
+  <h2 style="text-align:center; font-size:42px; margin:0 0 12px;">Review</h2>
+  <p style="text-align:center; margin:0 0 28px; line-height:1.6; color:#333;">
+    Tous les accents en une frappe. Chiffres sans Maj. Apostrophe directe. Majuscules accentuées possibles.
+  </p>
+
+  <!-- form -->
+  <div style="max-width:760px; margin:0 auto; background:#fff; border-radius:14px; padding:20px; box-shadow:0 2px 8px rgba(0,0,0,.06);">
+    <form id="reviewForm" style="display:grid; grid-template-columns:1fr 200px; gap:12px 16px; align-items:center;">
+      <input id="rvName" type="text" placeholder="Nickname (옵션)" style="grid-column:1/2; height:46px; border:1px solid #ddd; border-radius:10px; padding:0 12px; font-size:16px;">
+      <div style="grid-column:2/3; display:flex; align-items:center; gap:8px; justify-content:flex-end;">
+        <span style="font-size:14px; color:#666;">Rating</span>
+        <div id="rvStars" aria-label="rating" style="display:flex; cursor:pointer; font-size:24px; line-height:1;"></div>
+      </div>
+      <textarea id="rvText" required placeholder="후기를 적어주세요 (필수)" style="grid-column:1/3; min-height:120px; border:1px solid #ddd; border-radius:10px; padding:12px; font-size:16px; resize:vertical;"></textarea>
+      <button type="submit" style="grid-column:1/3; height:48px; border:0; border-radius:10px; font-size:16px; font-weight:700; background:#222; color:#fff; cursor:pointer;">Submit</button>
+      <div style="grid-column:1/3; font-size:13px; color:#777; text-align:right;">닉네임은 옵션, 별점/내용은 필수입니다.</div>
+    </form>
+  </div>
+
+  <!-- list -->
+  <div id="rvList" style="max-width:760px; margin:24px auto 0; display:flex; flex-direction:column; gap:16px;"></div>
+</section>
+
+<script>
+(function(){
+  const LS_KEY='accentslibres.reviews.v1';
+
+  // 샘플(첫 방문 시 목록 채움)
+  const samples=[
+    {name:'Camille D.',stars:5,text:'Enfin un AZERTY intelligent ! Les accents sortent naturellement.'},
+    {name:'Marc L.',stars:4,text:'Très fluide. Je tape plus vite qu’avant, sans lever la main.'},
+    {name:'Zoé P.',stars:5,text:'“Libérez les accents ?” Mission accomplie !'},
+    {name:'Julien',stars:5,text:'Chiffres sans Maj, apostrophe directe… exactement ce qu’il manquait.'},
+    {name:'Prof. Elise',stars:5,text:'Je l’ai montré à mes élèves : adoption immédiate.'}
+  ];
+
+  const $form=document.getElementById('reviewForm');
+  const $name=document.getElementById('rvName');
+  const $text=document.getElementById('rvText');
+  const $list=document.getElementById('rvList');
+  const $stars=document.getElementById('rvStars');
+
+  // 별점 위젯
+  let starVal=0;
+  function renderStars(v){
+    $stars.innerHTML='';
+    for(let i=1;i<=5;i++){
+      const s=document.createElement('span');
+      s.textContent=i<=v?'★':'☆';
+      s.style.color='#f7b500';
+      s.style.marginLeft=i===1?'0':'2px';
+      s.dataset.v=i;
+      $stars.appendChild(s);
+    }
+  }
+  $stars.addEventListener('mousemove',e=>{
+    const t=e.target.closest('span'); if(t) renderStars(+t.dataset.v);
+  });
+  $stars.addEventListener('mouseleave',()=>renderStars(starVal||0));
+  $stars.addEventListener('click',e=>{
+    const t=e.target.closest('span'); if(!t) return;
+    starVal=+t.dataset.v; renderStars(starVal);
+  });
+  renderStars(0);
+
+  // 저장/로드
+  function load(){
+    try{
+      const raw=localStorage.getItem(LS_KEY);
+      return raw?JSON.parse(raw):null;
+    }catch{ return null; }
+  }
+  function save(list){ localStorage.setItem(LS_KEY, JSON.stringify(list)); }
+
+  // 렌더
+  function escapeHtml(s){return String(s).replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
+  function render(list){
+    $list.innerHTML='';
+    (list||[]).forEach(it=>{
+      const card=document.createElement('div');
+      card.style.cssText='background:#f3f1e7;border-radius:14px;padding:18px;';
+      const star='★'.repeat(it.stars)+'☆'.repeat(5-it.stars);
+      card.innerHTML=
+        `<div style="color:#f7b500;font-size:18px;line-height:1">${star}</div>
+         <div style="font-size:18px;margin-top:6px">${escapeHtml(it.text)}</div>
+         <div style="font-size:14px;color:#777;margin-top:8px">— ${escapeHtml(it.name||'Anonyme')}</div>`;
+      $list.appendChild(card);
+    });
+  }
+
+  // 초기화(첫 로드에 샘플 주입)
+  (function init(){
+    const first=load();
+    if(!first){ save(samples); render(samples); }
+    else render(first);
+  })();
+
+  // 제출
+  $form.addEventListener('submit',e=>{
+    e.preventDefault();
+    const name=$name.value.trim();
+    const text=$text.value.trim();
+    if(!starVal){ alert('별점을 선택해 주세요.'); return; }
+    if(!text){ alert('후기를 입력해 주세요.'); return; }
+
+    const data=load()||[];
+    data.unshift({name,stars:starVal,text});
+    save(data);
+    render(data);
+
+    // reset
+    $name.value=''; $text.value=''; starVal=0; renderStars(0);
+  });
+})();
+</script>
+<style>
+  /* Stage 아래 도킹 영역 */
+  #reviewsDock{
+    max-width:1024px; margin:10px auto 4px;   /* ← 원하면 위여백 조절 */
+    display:flex; justify-content:center; align-items:center;
+  }
+  /* 도킹된 리뷰 보기 버튼(애니메이션 없음) */
+  #reviewsCue{
+    position:relative;                        /* ← absolute/fixed 아님 */
+    padding:8px 14px; border-radius:999px;
+    background:rgba(0,0,0,.65); color:#fff;
+    font:600 14px var(--ui-font);
+    display:flex; align-items:center; gap:8px;
+    cursor:pointer; pointer-events:auto;
+    backdrop-filter:saturate(1.2) blur(2px);
+    box-shadow:0 4px 10px rgba(0,0,0,.25);
+  }
+  #reviewsCue .chev{font-size:14px; line-height:1;}
+</style>
+
+<script>
+(function(){
+  const LS_KEY='accentslibres.reviews.v1';
+  const stage   = document.getElementById('stage');
+  const reviews = document.getElementById('reviews');
+  const fitwrap = document.getElementById('fitwrap');
+  if(!stage || !reviews || !fitwrap) return;
+
+  // 기존 cue/fab/dock 제거
+  document.getElementById('reviewsCue')?.remove();
+  document.getElementById('fabReviews')?.remove();
+  document.getElementById('reviewsDock')?.remove();
+
+  // 리뷰 개수
+  let n=0; try{ const a=JSON.parse(localStorage.getItem(LS_KEY)||'[]'); n=Array.isArray(a)?a.length:0; }catch(e){}
+
+  // --- 도킹 컨테이너(무대 아래, fitwrap 바깥) ---
+  const dock = document.createElement('div');
+  dock.id = 'reviewsDock';
+  dock.style.cssText = 'max-width:1024px;margin:-60px auto 34px;display:flex;justify-content:center;';
+
+  const cue = document.createElement('div');
+  cue.id = 'reviewsCue';
+  cue.style.cssText = 'position:relative;padding:8px 14px;border-radius:999px;background:rgba(0,0,0,.65);color:#fff;font:600 14px var(--ui-font);display:flex;align-items:center;gap:8px;cursor:pointer;backdrop-filter:saturate(1.2) blur(2px);box-shadow:0 4px 10px rgba(0,0,0,.25);';
+  cue.innerHTML = `<span class="chev" style="font-size:14px;line-height:1;">▼</span>
+                   <span>Voir les avis${n?` (${n})`:''}</span>`;
+  cue.addEventListener('click',()=>reviews.scrollIntoView({behavior:'smooth', block:'start'}));
+  dock.appendChild(cue);
+
+  // ✅ fitwrap "바깥"으로 삽입(옆이 아니라 아래 줄에 위치)
+  fitwrap.parentNode.insertBefore(dock, fitwrap.nextSibling);
+})();
+</script>
+
+<footer style="
+  background:#f2f0e6;
+  padding:28px 0;
+  font-family:var(--ui-font);
+  text-align:center;
+  font-size:15px;
+  color:#555;
+  border-top:1px solid #ddd;
+">
+  <div>Accents Libres © 2025</div>
+  <div style="margin-top:6px;">
+    Contact : <a href="mailto:contact@accentslibres.com" style="color:#333;text-decoration:none;">contact@accentslibres.com</a>
+  </div>
+</footer>
+
+</body>
+</html>
